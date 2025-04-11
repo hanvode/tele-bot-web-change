@@ -9,10 +9,8 @@
     "dev": "ts-node src/index.ts"
   },
   "dependencies": {
-    "@vitalets/google-translate-api": "^9.2.1",
     "axios": "^1.6.2",
     "node-telegram-bot-api": "^0.64.0",
-    "openai": "^4.93.0",
     "winston": "^3.11.0"
   },
   "devDependencies": {

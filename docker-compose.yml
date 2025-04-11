@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  api-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: api-monitor
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_BOT_TOKEN=7952191317:AAHJwc-Lse40wBwYn2lfkWQNTPk34RGHGYM
+      - TELEGRAM_CHAT_ID=-4673029504
+      - API_URL=https://www.msa.gov.cn/msacncms_wap//cmschannel/selectArticle/pageListById
+      - CHECK_INTERVAL=60
+    volumes:
+      - ./logs:/app/logs
