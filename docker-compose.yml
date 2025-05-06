@@ -7,10 +7,7 @@ services:
       dockerfile: Dockerfile
     container_name: api-monitor
     restart: unless-stopped
-    environment:
-      - TELEGRAM_BOT_TOKEN
-      - TELEGRAM_CHAT_ID=
-      - API_URL=https://www.msa.gov.cn/msacncms_wap//cmschannel/selectArticle/pageListById
-      - CHECK_INTERVAL=60
+    env_file:
+      - ./.env
     volumes:
       - ./logs:/app/logs

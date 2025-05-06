@@ -4,20 +4,35 @@ import * as winston from 'winston';
 import TelegramBot from 'node-telegram-bot-api';
 
 
-const mapKeyArea = new Map<string,string>(
+const mapKeyArea = new Map<string, string>(
     [
-        ['D3340711-057B-494B-8FA0-9EEDC4C5EAD9','Hải Nam'],
-        ['1E478D40-9E85-4918-BF12-478B8A19F4A8','Quảng Đông'],
-        ['86DE2FFF-FF2C-47F9-8359-FD1F20D6508F','Quảng Tây'],
+        ['D3340711-057B-494B-8FA0-9EEDC4C5EAD9', 'Hải Nam'],
+        ['1E478D40-9E85-4918-BF12-478B8A19F4A8', 'Quảng Đông'],
+        ['86DE2FFF-FF2C-47F9-8359-FD1F20D6508F', 'Quảng Tây'],
+        ['5EB28631-6746-4A6F-AAA1-FCA5BFF0A2A9', 'Hải Nam'],
+        ['32FA3793-3941-48F7-B5C3-EC112D2BF8AF', 'Quảng Đông'],
+        ['8375B077-B2CF-4281-A46B-68E2FF8AA08F', 'Quảng Tây'],
     ]
 )
+const areaKeys = ['D3340711-057B-494B-8FA0-9EEDC4C5EAD9', '1E478D40-9E85-4918-BF12-478B8A19F4A8', '86DE2FFF-FF2C-47F9-8359-FD1F20D6508F', '5EB28631-6746-4A6F-AAA1-FCA5BFF0A2A9', '32FA3793-3941-48F7-B5C3-EC112D2BF8AF', '8375B077-B2CF-4281-A46B-68E2FF8AA08F']
 
-const areaKeys = ['D3340711-057B-494B-8FA0-9EEDC4C5EAD9','1E478D40-9E85-4918-BF12-478B8A19F4A8','86DE2FFF-FF2C-47F9-8359-FD1F20D6508F']
+interface INewData {
+    articleid: string;
+    channelId: string;
+    articletitle?: string;
+    publishtime?: string;
+    [key: string]: any;
+}
 
 interface APIData {
     data?: any[];
+    list?: INewData[];
+    articletitle?: string;
+    articlepublishtime?: string;
+    articledescription?: string;
     [key: string]: any;
 }
+
 interface IGetApiParams {
     articleId: string;
     channelId: string;
@@ -28,21 +43,17 @@ class APIMonitor {
     private logger!: winston.Logger;
     private checkInterval: number;
     private telegramChatId: string;
-    private previousData1: APIData;
-    private previousData2: APIData;
-    private previousData3: APIData;
+    private mapIdNew: Map<string, APIData>;
 
     constructor(
-        private telegramBotToken: string, 
-        telegramChatId: string, 
+        private telegramBotToken: string,
+        telegramChatId: string,
         checkInterval: number = 60
     ) {
         this.telegramBot = new TelegramBot(telegramBotToken, { polling: false });
         this.telegramChatId = telegramChatId;
         this.checkInterval = checkInterval * 1000; // Convert to milliseconds
-        this.previousData1 = {};
-        this.previousData2 = {};
-        this.previousData3 = {};
+        this.mapIdNew = new Map<string, APIData>();
 
         this.setupLogging();
     }
@@ -50,7 +61,7 @@ class APIMonitor {
     private setupLogging(): void {
         // Use a specific file path
         const logPath = path.resolve('./logs/api_monitor.log');
-        
+
         this.logger = winston.createLogger({
             level: 'info',
             format: winston.format.combine(
@@ -60,7 +71,7 @@ class APIMonitor {
                 })
             ),
             transports: [
-                new winston.transports.File({ 
+                new winston.transports.File({
                     filename: logPath,
                 }),
                 new winston.transports.Console()
@@ -68,7 +79,7 @@ class APIMonitor {
         });
     }
 
-    private async getApiContent({ articleId, channelId, _ }: IGetApiParams, url='https://www.msa.gov.cn/msacncms_wap//cmsarticle/getArticle'): Promise<APIData> {
+    private async getApiContent({ articleId, channelId, _ }: IGetApiParams, url = 'https://www.msa.gov.cn/msacncms_wap//cmsarticle/getArticle'): Promise<APIData> {
         try {
             this.logger.info(`Starting to fetch API content: ${url}`);
 
@@ -103,88 +114,69 @@ class APIMonitor {
     * @returns Promise với dữ liệu trả về từ API
      */
     private async postFormDataApi(url: string, channelId: string, pageNum: number, pageSize: number): Promise<APIData> {
-    try {
-        this.logger.info(`Starting to post form data to API: ${url}`);
-        
-        // Tạo đối tượng FormData
-        const formData = new FormData();
-        formData.append('channelId', channelId);
-        formData.append('pageNum', pageNum.toString());
-        formData.append('pageSize', pageSize.toString());
-        
-        const response = await axios.post(url, formData, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept': 'application/json',
-                'Accept-Language': 'en-US,en;q=0.9',
-                // Content-Type sẽ tự động được thiết lập bởi axios khi sử dụng FormData
-            },
-            timeout: 30000
-        });
-        
-        return response.data;
-    } catch (error) {
-        this.logger.error(`Error posting form data to API: ${url}`, error);
-        throw error;
-    }
+        try {
+            this.logger.info(`Starting to post ${pageSize} form data from ${pageNum} to API: ${url}`);
+
+            // Tạo đối tượng FormData
+            const formData = new FormData();
+            formData.append('channelId', channelId);
+            formData.append('pageNum', pageNum.toString());
+            formData.append('pageSize', pageSize.toString());
+
+            const response = await axios.post(url, formData, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'Accept': 'application/json',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    // Content-Type sẽ tự động được thiết lập bởi axios khi sử dụng FormData
+                },
+                timeout: 30000
+            });
+
+            return response.data;
+        } catch (error) {
+            this.logger.error(`Error posting form data to API: ${url}`, error);
+            throw error;
+        }
     }
 
     // Ví dụ sử dụng với giá trị cụ thể
-    private async getChannelData(url: string, areaKey: string): Promise<APIData> {
-    return this.postFormDataApi(
-        url,
-        areaKey,
-        1,
-        10
-    );
-    }
-
-    private analyzeApiChanges(oldData: APIData, newData: APIData): { is_changed:boolean; message:string ; newest_content: any} {
-        try {
-            const changes: { is_changed:boolean; message:string ; newest_content: any} = {
-                is_changed: false,
-                message: "Không có tin tức mới!",
-                newest_content: oldData.list[0],
-            };
-            
-            if (!oldData || Object.keys(oldData).length === 0) {
-                changes.message = "Initial data";
-                return changes;
-            }
-  
-            if (newData.list && oldData.list) {
-                const newItems = newData.list;
-                const oldItems = oldData.list;
-                const oldArticleid = oldItems[0].articleid;
-                if (newItems[0].articleid !== oldArticleid) {
-                    changes.is_changed = true;
-                    for (let i = 0; i < newItems.length; i++) {
-                        if (newItems[i].articleid === oldArticleid) {
-                            changes.message = `Có ${i} tin mới`;
-                            changes.newest_content = newItems[0];
-                            break;
-                        }
+    private async getChannelData(url: string, areaKey: string): Promise<INewData[]> {
+        const now = new Date();
+        const currentDate = this.getDateString(now);
+        const newDatas :INewData[] = [];
+        let isContinuePost = true;
+        let start = 1;
+        while (isContinuePost) {
+            const dataFromApiPost = await this.postFormDataApi(url, areaKey, start, 10);
+            if (dataFromApiPost.list) {
+                for (const newData of dataFromApiPost.list) {
+                    const timeItem = newData.articlepublishtime;
+                    const [dateItem] = timeItem.split(" ");
+                    if (dateItem === currentDate) {
+                        newDatas.push(newData);
+                    } else {
+                        isContinuePost = false;
+                        break;
                     }
                 }
+                start += 10;
             }
-
-        return changes
-
-        } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            this.logger.error(`Error analyzing API changes: ${errorMessage}`);
-            return  {
-                is_changed: false,
-                message: "Lỗi xảy ra khi phân tích thay đổi nội dung!",
-                newest_content: null
-            };
         }
+        return newDatas;
+    }
+
+    /**
+   * Lấy chuỗi ngày theo định dạng YYYY-MM-DD
+   */
+    private getDateString(date: Date): string {
+        return date.toISOString().slice(0, 10);
     }
 
     private async sendTelegramMessage(message: string): Promise<void> {
         try {
-            await this.telegramBot.sendMessage(this.telegramChatId, message, { 
-                parse_mode: 'HTML' 
+            await this.telegramBot.sendMessage(this.telegramChatId, message, {
+                parse_mode: 'HTML'
             });
             this.logger.info("Telegram notification sent successfully");
         } catch (error) {
@@ -193,62 +185,68 @@ class APIMonitor {
         }
     }
 
-    private async handleBuildMessage(newData: APIData,previousData: APIData, index: number) :Promise<void> {
-        if (Object.keys(newData).length > 0) {
-            const changes = this.analyzeApiChanges(previousData, newData);
-            // const currentTime = new Date().toISOString().replace('T', ' ').split('.')[0];   
-
-            // if (changes.is_changed) {
-                const changedContent = changes.newest_content;
-                const articleId = changedContent.articleid;
-                const channelId = changedContent.channelId;
-                const _ = new Date().getTime();
-                const changeDetail = await this.getApiContent({articleId,channelId,_});
-                const area = mapKeyArea.get(areaKeys[index]) || 'Khu vực mới'
-
-                const message = 
-                    `🔔 <b>${changes.message}!</b>\n\n` +
-                    `🌐 Khu vực: ${area}\n\n` +
-                    `⏰ Time: ${changeDetail.articlepublishtime}\n\n` +
-                    `📝 Tiêu đề bài mới nhất: ${changeDetail.articletitle}\n
-                        Nội dung bài mới nhất:\n${changeDetail.articledescription}
-                    `;
-
-                await this.sendTelegramMessage(message);
-            // }
+    private async handleBuildMessage(newData: INewData[], index: number): Promise<string> {
+        let messageArea: string = ''
+        if (newData.length > 0) {
+            const area = mapKeyArea.get(areaKeys[index]) || 'Khu vực mới'
+            messageArea += `🌐 Khu vực: ${area} có ${newData.length} tin mới\n\n`
+            let stt = 1;
+            for (let i = newData.length - 1; i >= 0; i--) {
+                const itemChange = newData[i];
+                const articleId = itemChange.articleid;
+                let existedNew = this.mapIdNew.get(articleId);
+                if (!existedNew) {
+                    const channelId = itemChange.channelId;
+                    const _ = new Date().getTime();
+                    existedNew = await this.getApiContent({ articleId, channelId, _ });
+                    this.mapIdNew.set(articleId, existedNew);
+                }
+                if (existedNew.articletitle?.includes('井钻') || existedNew.articledescription?.includes('井钻') || existedNew.articletitle?.includes('海洋石油') || existedNew.articledescription?.includes('海洋石油')) {
+                    messageArea += `🔔 <b>Tin quan trọng!!</b>\n`
+                }
+                messageArea += `⏰ Thời gian: ${existedNew.articlepublishtime} (giờ Trung Quốc)\n` +
+                    `📝 ${stt}. Tiêu đề bài: ${existedNew.articletitle}\n
+                        Nội dung bài:\n${existedNew.articledescription}\n\n`;
+                stt++;
+            }
         }
+        return messageArea;
     }
 
     public async monitorApi(apiUrl: string): Promise<void> {
         this.logger.info(`Starting to monitor API: ${apiUrl}`);
-
-        let [initialData1,initialData2,initialData3] = await Promise.all([
-            this.getChannelData(apiUrl,areaKeys[0]),
-            this.getChannelData(apiUrl,areaKeys[1]),
-            this.getChannelData(apiUrl,areaKeys[2]),
-        ]) 
-        this.previousData1 = initialData1;
-        this.previousData2 = initialData2;
-        this.previousData3 = initialData3;
-
         setInterval(async () => {
             try {
                 this.logger.info("Checking API for changes...");
-                const [newData1,newData2,newData3] = await Promise.all([
+                const [newDatas1, newDatas2, newDatas3, newDatasNoti1, newDatasNoti2, newDatasNoti3] = await Promise.all([
                     this.getChannelData(apiUrl, areaKeys[0]),
                     this.getChannelData(apiUrl, areaKeys[1]),
                     this.getChannelData(apiUrl, areaKeys[2]),
-                ]) 
-
-                await Promise.all([
-                    this.handleBuildMessage(newData1,this.previousData1,0),
-                    this.handleBuildMessage(newData2,this.previousData2,1),
-                    this.handleBuildMessage(newData3,this.previousData3,2),
+                    this.getChannelData(apiUrl, areaKeys[3]),
+                    this.getChannelData(apiUrl, areaKeys[4]),
+                    this.getChannelData(apiUrl, areaKeys[5]),
                 ])
-         
-                this.previousData1 = newData1;
-                this.previousData2 = newData2;
-                this.previousData3 = newData3;
+
+                const [mess1, mess2, mess3, noti1, noti2, noti3] =  await Promise.all([
+                    this.handleBuildMessage(newDatas1, 0),
+                    this.handleBuildMessage(newDatas2, 1),
+                    this.handleBuildMessage(newDatas3, 2),
+                    this.handleBuildMessage(newDatasNoti1, 3),
+                    this.handleBuildMessage(newDatasNoti2, 4),
+                    this.handleBuildMessage(newDatasNoti3, 5),
+                ])
+                const now = new Date();
+                const currentDate = this.getDateString(now);
+                const countNews = newDatas1.length + newDatas2.length + newDatas3.length;
+                let messageAll :string = `🔔 <b>Cảnh báo hàng hải</b>\n\n` +
+                    `🌐 <b>Có ${countNews} tin mới ngày ${currentDate}</b>\n` + `${mess1}\n\n\n` + `${mess2}\n\n\n` + `${mess3}` 
+
+                const countNotis = newDatasNoti1.length + newDatasNoti2.length + newDatasNoti3.length;
+                let messageNotiAll :string = `🔔 <b>Thông báo</b>\n\n` +
+                    `🌐 <b>Có ${countNotis} tin mới ngày ${currentDate}</b>\n` + `${noti1}\n\n\n` + `${noti2}\n\n\n` + `${noti3}` 
+
+                await this.sendTelegramMessage(messageAll);
+                await this.sendTelegramMessage(messageNotiAll);
 
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
@@ -274,7 +272,7 @@ async function main() {
     );
 
     await monitor.monitorApi(API_URL);
-    
+
     // Prevent Node.js from exiting
     process.on('SIGINT', () => {
         console.log('Gracefully shutting down');
