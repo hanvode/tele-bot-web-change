@@ -1,0 +1,8 @@
+Hướng dẫn cài đặt trên cloudflare
+Chạy trên Cloudflare Worker, đơn giản hoạt động như một proxy cho Telegram Bot API. Proxy này cho phép bạn vượt qua các hạn chế mạng và tạo middleware cho các ứng dụng bot Telegram.
+B1: Truy cập https://dash.cloudflare.com và đăng nhập, vào Compute (Workers) => Workers & Pages
+B2: Bấm Create ( hoặc Create Worker), chọn Start with Hello World
+B3: Nhập tên miền (tuỳ thích), phần worker.js thì sao chép nội dung từ code src/worker.js
+B4: Nhấn deploy
+Vậy đã tạo proxy thành công, vào setting để lấy domain của proxy và dán vào biến Proxy_url trong file .env trên máy bạn.
+Sau đó chạy lại chương trình.
