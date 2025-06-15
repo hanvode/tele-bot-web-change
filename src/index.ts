@@ -1,7 +1,6 @@
 import axios from 'axios';
 import * as path from 'path';
 import * as winston from 'winston';
-import TelegramBot from 'node-telegram-bot-api';
 
 
 const mapKeyArea = new Map<string, string>(
@@ -39,19 +38,20 @@ interface IGetApiParams {
     _: number;
 }
 class APIMonitor {
-    private telegramBot: TelegramBot;
     private logger!: winston.Logger;
     private checkInterval: number;
     private telegramChatId: string;
+    private proxyURL: string;
     private mapIdNew: Map<string, APIData>;
 
     constructor(
         private telegramBotToken: string,
         telegramChatId: string,
+        proxyURL: string,
         checkInterval: number = 60
     ) {
-        this.telegramBot = new TelegramBot(telegramBotToken, { polling: false });
         this.telegramChatId = telegramChatId;
+        this.proxyURL = proxyURL;
         this.checkInterval = checkInterval * 1000; // Convert to milliseconds
         this.mapIdNew = new Map<string, APIData>();
 
@@ -144,7 +144,7 @@ class APIMonitor {
     private async getChannelData(url: string, areaKey: string): Promise<INewData[]> {
         const now = new Date();
         const currentDate = this.getDateString(now);
-        const newDatas :INewData[] = [];
+        const newDatas: INewData[] = [];
         let isContinuePost = true;
         let start = 1;
         while (isContinuePost) {
@@ -175,15 +175,24 @@ class APIMonitor {
 
     private async sendTelegramMessage(message: string): Promise<void> {
         try {
-            await this.telegramBot.sendMessage(this.telegramChatId, message, {
+            const url = `${this.proxyURL}/bot${this.telegramBotToken}/sendMessage`;
+            const response = await axios.post(url, {
+                chat_id: Number(this.telegramChatId),
+                text: message,
                 parse_mode: 'HTML'
+            }, {
+                headers: {
+                    'Content-Type': 'application/json'
+                }
             });
-            this.logger.info("Telegram notification sent successfully");
-        } catch (error) {
+
+            this.logger.info("✅ Telegram notification sent successfully", response.data);
+        } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             this.logger.error(`Error sending Telegram message: ${errorMessage}`);
         }
     }
+
 
     private async handleBuildMessage(newData: INewData[], index: number): Promise<string> {
         let messageArea: string = ''
@@ -202,7 +211,7 @@ class APIMonitor {
                     this.mapIdNew.set(articleId, existedNew);
                 }
                 if (existedNew.articletitle?.includes('井钻') || existedNew.articledescription?.includes('井钻') || existedNew.articletitle?.includes('海洋石油') || existedNew.articledescription?.includes('海洋石油')) {
-                    messageArea += `🔔 <b>Tin quan trọng!!</b>\n`
+                    messageArea += `🔔 Tin quan trọng!!\n`
                 }
                 messageArea += `⏰ Thời gian: ${existedNew.articlepublishtime} (giờ Trung Quốc)\n` +
                     `📝 ${stt}. Tiêu đề bài: ${existedNew.articletitle}\n
@@ -227,7 +236,7 @@ class APIMonitor {
                     this.getChannelData(apiUrl, areaKeys[5]),
                 ])
 
-                const [mess1, mess2, mess3, noti1, noti2, noti3] =  await Promise.all([
+                const [mess1, mess2, mess3, noti1, noti2, noti3] = await Promise.all([
                     this.handleBuildMessage(newDatas1, 0),
                     this.handleBuildMessage(newDatas2, 1),
                     this.handleBuildMessage(newDatas3, 2),
@@ -238,12 +247,12 @@ class APIMonitor {
                 const now = new Date();
                 const currentDate = this.getDateString(now);
                 const countNews = newDatas1.length + newDatas2.length + newDatas3.length;
-                let messageAll :string = `🔔 <b>Cảnh báo hàng hải</b>\n\n` +
-                    `🌐 <b>Có ${countNews} tin mới ngày ${currentDate}</b>\n` + `${mess1}\n\n\n` + `${mess2}\n\n\n` + `${mess3}` 
+                let messageAll: string = `🔔 Cảnh báo hàng hải\n\n` +
+                    `🌐 Có ${countNews} tin mới ngày ${currentDate}\n` + `${mess1}\n\n\n` + `${mess2}\n\n\n` + `${mess3}`
 
                 const countNotis = newDatasNoti1.length + newDatasNoti2.length + newDatasNoti3.length;
-                let messageNotiAll :string = `🔔 <b>Thông báo</b>\n\n` +
-                    `🌐 <b>Có ${countNotis} tin mới ngày ${currentDate}</b>\n` + `${noti1}\n\n\n` + `${noti2}\n\n\n` + `${noti3}` 
+                let messageNotiAll: string = `🔔 Thông báo\n\n` +
+                    `🌐 Có ${countNotis} tin mới ngày ${currentDate}\n` + `${noti1}\n\n\n` + `${noti2}\n\n\n` + `${noti3}`
 
                 await this.sendTelegramMessage(messageAll);
                 await this.sendTelegramMessage(messageNotiAll);
@@ -260,6 +269,7 @@ class APIMonitor {
 }
 
 async function main() {
+    const PROXY_URL = process.env.PROXY_URL || '';
     const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
     const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
     const CHECK_INTERVAL = parseInt(process.env.CHECK_INTERVAL || "3600", 10);
@@ -268,6 +278,7 @@ async function main() {
     const monitor = new APIMonitor(
         TELEGRAM_BOT_TOKEN,
         TELEGRAM_CHAT_ID,
+        PROXY_URL,
         CHECK_INTERVAL
     );
 
