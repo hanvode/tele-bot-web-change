@@ -1,6 +1,7 @@
 import axios from 'axios';
 import * as path from 'path';
 import * as winston from 'winston';
+import { translate } from '@vitalets/google-translate-api';
 
 
 const mapKeyArea = new Map<string, string>(
@@ -173,6 +174,81 @@ class APIMonitor {
         return date.toISOString().slice(0, 10);
     }
 
+    private async translateViaProxy(text: string): Promise<string> {
+        try {
+            const response = await axios.post('https://translate.nhachoc1999.workers.dev', {
+                q: text,
+                from: 'zh-CN',
+                to: 'vi'
+            });
+
+            return response.data.translatedText;
+        } catch (err: unknown) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            console.error('❌ Lỗi dịch qua proxy:', errMsg);
+            return text; // fallback
+        }
+    }
+
+
+
+    private async translateMultiline(text: string): Promise<string> {
+        const segments = text
+            .split('\n')
+            .map(line => line.trim())
+            .filter(line => line !== '');
+
+        const translatedLines: string[] = [];
+        const batchSize = 5; // Số dòng mỗi batch
+        const separator = '|||'; // Dùng để tách các dòng trong batch
+
+        for (let i = 0; i < segments.length; i += batchSize) {
+            const batch = segments.slice(i, i + batchSize);
+            const batchText = batch.join(`\n${separator}\n`);
+
+            try {
+                const translatedBatch = await this.translateViaProxy(batchText);
+                const lines = translatedBatch.split(separator).map(l => l.trim());
+                // Nếu số dòng dịch ra khớp, dùng luôn
+                if (lines.length === batch.length) {
+                    translatedLines.push(...lines);
+                } else {
+                    console.warn(`⚠️ Số dòng dịch không khớp batch (${i}): fallback về bản gốc`);
+                    translatedLines.push(...batch);
+                }
+
+            } catch (error: unknown) {
+                const errMsg = error instanceof Error ? error.message : String(error);
+                console.error(`❌ Lỗi dịch batch tại dòng ${i}:`, errMsg);
+                translatedLines.push(...batch); // fallback nếu lỗi
+            }
+        }
+
+        return translatedLines.join('\n');
+    }
+
+
+    // private async translateMultiline1(text: string): Promise<string> {
+    //     const segments = text.split('\n').filter(line => line.trim() !== '');
+    //     const translatedLines = [];
+
+    //     for (const line of segments) {
+    //         try {
+    //             const { text: translated } = await translate(line, {
+    //                 from: 'zh-CN',
+    //                 to: 'vi'
+    //             });
+    //             translatedLines.push(translated);
+    //         } catch (err: unknown) {
+    //             const errorMessage = err instanceof Error ? err.message : String(err);
+    //             console.error('Lỗi dịch dòng:', line, errorMessage);
+    //             translatedLines.push(line); // fallback: giữ nguyên nếu lỗi
+    //         }
+    //     }
+
+    //     return translatedLines.join('\n');
+    // };
+
     private async sendTelegramMessage(message: string): Promise<void> {
         try {
             const url = `${this.proxyURL}/bot${this.telegramBotToken}/sendMessage`;
@@ -214,8 +290,8 @@ class APIMonitor {
                     messageArea += `🔔 Tin quan trọng!!\n`
                 }
                 messageArea += `⏰ Thời gian: ${existedNew.articlepublishtime} (giờ Trung Quốc)\n` +
-                    `📝 ${stt}. Tiêu đề bài: ${existedNew.articletitle}\n
-                        Nội dung bài:\n${existedNew.articledescription}\n\n`;
+                    `📝 ${stt}. Tiêu đề bài: ${(await this.translateMultiline(existedNew.articletitle || ''))}\n
+                        Nội dung bài:\n${(await this.translateMultiline(existedNew.articledescription || ''))}\n\n`;
                 stt++;
             }
         }
