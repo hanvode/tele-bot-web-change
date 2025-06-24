@@ -193,6 +193,7 @@ class APIMonitor {
 
 
     private async translateMultiline(text: string): Promise<string> {
+        if (!text) return '';
         const segments = text
             .split('\n')
             .map(line => line.trim())
@@ -249,20 +250,31 @@ class APIMonitor {
     //     return translatedLines.join('\n');
     // };
 
+    private splitMessage(message: string, maxLength = 3000): string[] {
+        let parts = [];
+        for (let i = 0; i < message.length; i += maxLength) {
+            parts.push(message.slice(i, i + maxLength));
+        }
+        return parts;
+    }
+
     private async sendTelegramMessage(message: string): Promise<void> {
         try {
+            const parts = this.splitMessage(message);
             const url = `${this.proxyURL}/bot${this.telegramBotToken}/sendMessage`;
-            const response = await axios.post(url, {
-                chat_id: Number(this.telegramChatId),
-                text: message,
-                parse_mode: 'HTML'
-            }, {
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
 
-            this.logger.info("✅ Telegram notification sent successfully", response.data);
+            for (let part of parts) {
+                const response = await axios.post(url, {
+                    chat_id: Number(this.telegramChatId),
+                    text: part,
+                    parse_mode: 'HTML'
+                }, {
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                this.logger.info("✅ Telegram notification sent successfully", response.data);
+            }
         } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             this.logger.error(`Error sending Telegram message: ${errorMessage}`);
