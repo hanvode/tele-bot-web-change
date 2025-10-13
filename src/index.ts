@@ -1,7 +1,7 @@
 import axios from 'axios';
 import * as path from 'path';
 import * as winston from 'winston';
-import { translate } from '@vitalets/google-translate-api';
+import sanitizeHtml from 'sanitize-html';
 
 
 const mapKeyArea = new Map<string, string>(
@@ -30,6 +30,9 @@ interface APIData {
     articletitle?: string;
     articlepublishtime?: string;
     articledescription?: string;
+    cmsArticleContent?: {
+        articlecontent?: string;
+    };
     [key: string]: any;
 }
 
@@ -229,27 +232,6 @@ class APIMonitor {
     }
 
 
-    // private async translateMultiline1(text: string): Promise<string> {
-    //     const segments = text.split('\n').filter(line => line.trim() !== '');
-    //     const translatedLines = [];
-
-    //     for (const line of segments) {
-    //         try {
-    //             const { text: translated } = await translate(line, {
-    //                 from: 'zh-CN',
-    //                 to: 'vi'
-    //             });
-    //             translatedLines.push(translated);
-    //         } catch (err: unknown) {
-    //             const errorMessage = err instanceof Error ? err.message : String(err);
-    //             console.error('Lỗi dịch dòng:', line, errorMessage);
-    //             translatedLines.push(line); // fallback: giữ nguyên nếu lỗi
-    //         }
-    //     }
-
-    //     return translatedLines.join('\n');
-    // };
-
     private splitMessage(message: string, maxLength = 3000): string[] {
         let parts = [];
         for (let i = 0; i < message.length; i += maxLength) {
@@ -258,11 +240,38 @@ class APIMonitor {
         return parts;
     }
 
+    private sanitizeForTelegram(message: string): string {
+        if (!message) return '';
+
+        // Loại bỏ toàn bộ HTML tag
+        let clean = sanitizeHtml(message, {
+            allowedTags: [], // Không cho phép tag nào cả
+            allowedAttributes: {}, // Không cho phép attribute nào
+        });
+
+        // Telegram có thể lỗi nếu còn các ký tự đặc biệt chưa encode
+        clean = clean
+            .replace(/&nbsp;/g, ' ') // thay &nbsp; bằng space
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/<[^>]*>/g, '') // đảm bảo remove tag còn sót
+            .replace(/\*/g, '\\*') // tránh lỗi markdown khi send parse_mode=Markdown
+            .replace(/_/g, '\\_')
+            .replace(/`/g, '\\`')
+            .replace(/\[/g, '\\[');
+
+        return clean.trim();
+    }
+
+
     private async sendTelegramMessage(message: string): Promise<void> {
         try {
-            const parts = this.splitMessage(message);
+            // Sanitize message to remove HTML tags and unsupported characters
+            const cleanMessage = this.sanitizeForTelegram(message);
+            const parts = this.splitMessage(cleanMessage);
+            // V2: use proxy to avoid telegram blocking
             const url = `${this.proxyURL}/bot${this.telegramBotToken}/sendMessage`;
-
             for (let part of parts) {
                 const response = await axios.post(url, {
                     chat_id: Number(this.telegramChatId),
@@ -275,6 +284,12 @@ class APIMonitor {
                 });
                 this.logger.info("✅ Telegram notification sent successfully", response.data);
             }
+
+            // V1: not use proxy
+            // for (let part of parts) {
+            //     await this.telegramBot.sendMessage(this.telegramChatId, part, { parse_mode: 'HTML' });
+            // }
+
         } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             this.logger.error(`Error sending Telegram message: ${errorMessage}`);
@@ -298,12 +313,12 @@ class APIMonitor {
                     existedNew = await this.getApiContent({ articleId, channelId, _ });
                     this.mapIdNew.set(articleId, existedNew);
                 }
-                if (existedNew.articletitle?.includes('井钻') || existedNew.articledescription?.includes('井钻') || existedNew.articletitle?.includes('海洋石油') || existedNew.articledescription?.includes('海洋石油')) {
+                if (existedNew.articletitle?.includes('井钻') || existedNew.cmsArticleContent?.articlecontent?.includes('井钻') || existedNew.articletitle?.includes('海洋石油') || existedNew.cmsArticleContent?.articlecontent?.includes('海洋石油')) {
                     messageArea += `🔔 Tin quan trọng!!\n`
                 }
-                messageArea += `⏰ Thời gian: ${existedNew.articlepublishtime} (giờ Trung Quốc)\n` +
-                    `📝 ${stt}. Tiêu đề bài: ${(await this.translateMultiline(existedNew.articletitle || ''))}\n
-                        Nội dung bài:\n${(await this.translateMultiline(existedNew.articledescription || ''))}\n\n`;
+                messageArea += `⏰ Thời gian: ${existedNew?.articlepublishtime} (giờ Trung Quốc)\n` +
+                    `📝 ${stt}. Tiêu đề bài: ${(await this.translateMultiline(existedNew?.articletitle || ''))}\n
+                        Nội dung bài:\n${(await this.translateMultiline(existedNew?.cmsArticleContent?.articlecontent || ''))}\n\n`;
                 stt++;
             }
         }
