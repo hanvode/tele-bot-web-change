@@ -6,13 +6,16 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts"
+    "dev": "ts-node src/index.ts",
+    "start:worker": "ts-node src/queues/monitorWorker.ts"
   },
   "dependencies": {
     "@vitalets/google-translate-api": "^9.1.0",
     "axios": "^1.6.2",
+    "bullmq": "^5.20.2",
     "node-telegram-bot-api": "^0.64.0",
     "sanitize-html": "^2.17.0",
+    "ioredis": "^5.4.1",
     "winston": "^3.11.0"
   },
   "devDependencies": {
