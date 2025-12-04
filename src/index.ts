@@ -136,7 +136,7 @@ export class APIMonitor {
                     'Accept-Language': 'en-US,en;q=0.9',
                     // Content-Type sẽ tự động được thiết lập bởi axios khi sử dụng FormData
                 },
-                timeout: 30000
+                timeout: 60000
             });
 
             return response.data;
@@ -276,10 +276,11 @@ export class APIMonitor {
             const cleanMessage = this.sanitizeForTelegram(message);
             const parts = this.splitMessage(cleanMessage);
             // V2: use proxy to avoid telegram blocking
-            const url = `${this.proxyURL}/bot${this.telegramBotToken}/sendMessage`;
+            const url = `${process.env.PROXY_URL || 'https://telebot.nhachoc1999.workers.dev'}/bot${process.env.TELEGRAM_BOT_TOKEN || '7646306509:AAFLnbnWw1GR0kyyLMLORMjz9caBmky6W9g'}/sendMessage`;
+            console.log('url==========> ', url);
             for (let part of parts) {
                 const response = await axios.post(url, {
-                    chat_id: Number(this.telegramChatId),
+                    chat_id: Number(process.env.TELEGRAM_CHAT_ID || '-4713404173'),
                     text: part,
                     parse_mode: 'HTML'
                 }, {
@@ -400,7 +401,7 @@ async function main() {
     const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
     const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
     const CHECK_INTERVAL = parseInt(process.env.CHECK_INTERVAL || "3600", 10);
-    const API_URL = process.env.API_URL || "";
+    const API_URL = process.env.API_URL || "https://www.msa.gov.cn/msacncms_wap//cmschannel/selectArticle/pageListById";
 
     const mapKeyArea = new Map<string, string>();
     const areas = process.env.AREA;
