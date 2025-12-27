@@ -12,18 +12,23 @@ services:
     depends_on:
       - redis
 
-  redis:
-    image: redis:7
-    container_name: redis
-    ports:
-      - "6379:6379"
-    
   worker:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: monitor-worker
-    depends_on:
-      - redis
+    env_file:
+      - ./.env
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
     command: ["node", "dist/queues/monitorWorker.js"] 
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    

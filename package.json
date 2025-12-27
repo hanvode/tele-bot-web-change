@@ -3,12 +3,11 @@
   "version": "1.0.0",
   "description": "API Monitoring Tool",
   "main": "dist/index.js",
-  "type": "module",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
-    "start:worker": "ts-node src/queues/monitorWorker.ts"
+    "start:worker": "node dist/queues/monitorWorker.ts"
   },
   "dependencies": {
     "@vitalets/google-translate-api": "^9.1.0",
