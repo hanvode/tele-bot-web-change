@@ -38,7 +38,7 @@ export class APIMonitor {
     // Ví dụ sử dụng với giá trị cụ thể
     public async getChannelData(url: string, areaKey: string): Promise<INewData[]> {
         const now = Date.now()
-        const thresholdTime = now - this.checkInterval;
+        const thresholdTime = now - this.checkInterval * 1000;
         const newDatas: INewData[] = [];
         let isContinuePost = true;
         let start = 1;
