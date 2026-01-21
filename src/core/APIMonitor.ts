@@ -17,7 +17,7 @@ export class APIMonitor {
             return res.data || {};
         } catch (error) {
             logger.error(`getApiContent error: ${String(error)}`);
-            return {};
+            throw error;
         }
     }
 
@@ -31,19 +31,29 @@ export class APIMonitor {
             return res.data || {};
         } catch (error) {
             logger.error(`postFormDataApi error: ${String(error)}`);
-            return {};
+            throw error;
         }
     }
 
     // Ví dụ sử dụng với giá trị cụ thể
     public async getChannelData(url: string, areaKey: string): Promise<INewData[]> {
         const now = Date.now()
-        const thresholdTime = now - this.checkInterval * 1000;
+        const thresholdTime = now - (this.checkInterval * 1000);
         const newDatas: INewData[] = [];
         let isContinuePost = true;
         let start = 1;
         while (isContinuePost) {
-            const dataFromApiPost = await this.postFormDataApi(url, areaKey, start, 10);
+            let dataFromApiPost;
+            try {
+                dataFromApiPost = await this.postFormDataApi(url, areaKey, start, 10);
+            } catch (error) {
+                throw error;
+            }
+
+            if (!dataFromApiPost) {
+                throw new Error("API trả về dữ liệu rỗng (null/undefined)");
+            }
+
             if (!dataFromApiPost.list || dataFromApiPost.list.length === 0) break;
 
             for (const newData of dataFromApiPost.list) {
