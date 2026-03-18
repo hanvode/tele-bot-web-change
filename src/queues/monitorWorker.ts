@@ -4,44 +4,107 @@ import { logger } from "../utils/logger";
 import { defaultAxios } from "../utils/http";
 
 
-const apiMonitor = new APIMonitor(process.env.PROXY_URL_TRANSLATE || '', Number(process.env.CHECK_INTERVAL || 60));
+type SentKey = string;
+
+function makeSentKey(postIndex: number, partIndex: number): SentKey {
+    return `${postIndex}:${partIndex}`;
+}
+
+const apiMonitor = new APIMonitor(Number(process.env.CHECK_INTERVAL || 60));
 
 export const worker = new Worker('monitorQueue', async job => {
     const { apiUrl, areaKey, index, areaName } = job.data;
+    const sentKeys: SentKey[] = job.data.sentKeys ?? [];
     const start = Date.now();
-    logger.info(`[Worker] job ${job.id} areaKey=${areaKey}`);
+    logger.info(`[Worker] job ${job.id} area ${areaName} sentKeys: ${sentKeys.length}`);
+    const tabTitle = index < 3 ? `🔔 Cảnh báo hàng hải: ` : `🔔 Thông báo: `;
 
+    const areaDatas = await apiMonitor.getChannelData(apiUrl, areaKey);
+    const sortedPosts = areaDatas.sort((a, b) => new Date(a.publishtime || '').getTime() - new Date(b.publishtime || '').getTime());
+    const telegramUrl = `${process.env.PROXY_URL || ''}/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
+    if (sortedPosts.length === 0) {
+        logger.info(`[Worker] no new posts ${tabTitle} for area ${areaName}`);
+        return { success: true, count: 0 };
+    }
+    const headerKey = 'header:0';
+    if (!sentKeys.includes(headerKey)) {
+        const now = new Date();
+        const dateStr = now.toISOString().slice(0, 10);
+        const headerText = tabTitle + `<b>${areaName}</b> có <b>${sortedPosts.length}</b> tin mới ngày ${dateStr}`;
+        await sendTelegramMessage(telegramUrl, headerText);
 
-    const newData = await apiMonitor.getChannelData(apiUrl, areaKey);
-    let message = await apiMonitor.handleBuildMessage(newData, areaName);
+        sentKeys.push(headerKey);
+        await job.updateData({ ...job.data, sentKeys });
+    }
 
-    if (message && message.trim()) {
-        message = index < 3 ? `🔔 Cảnh báo hàng hải\n\n` + message : `🔔 Thông báo\n\n` + message;
-        const cleanMessage = apiMonitor.sanitizeForTelegram(message);
-        const parts = apiMonitor.splitMessage(cleanMessage);
-        const url = `${process.env.PROXY_URL || ''}/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
-        for (const part of parts) {
-            try {
-                const response = await defaultAxios.post(url, { chat_id: Number(process.env.TELEGRAM_CHAT_ID), text: part, parse_mode: 'HTML' }, {
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
-                });
-                logger.info("✅ Telegram notification sent successfully", response.data);
-            } catch (err) {
-                logger.error('Send Telegram error: ' + String(err));
+    for (let postIndex = 0; postIndex < sortedPosts.length; postIndex++) {
+        const post = sortedPosts[postIndex];
+        const articleId = post.articleid;
+        const channelId = post.channelId;
+        const existedNew = await apiMonitor.getApiContent(articleId, channelId);
+        const isImportantNew = existedNew.articletitle?.includes('井钻') || existedNew.cmsArticleContent?.articlecontent?.includes('井钻') || existedNew.articletitle?.includes('海洋石油') || existedNew.cmsArticleContent?.articlecontent?.includes('海洋石油');
+        // Dịch nội dung bài
+        const translatedText = await apiMonitor.translateMultiline(existedNew?.cmsArticleContent?.articlecontent || '');
+        const translatedTitle = await apiMonitor.translateMultiline(existedNew?.articletitle || '');
+        // Tạo nội dung tin nhắn cho post này
+        const postMessage =
+            `${postIndex + 1}.${isImportantNew ? `🔔 Tin quan trọng!!` : ``} ${tabTitle} ${areaName} đăng lúc ${existedNew.articlepublishtime} (giờ TQ)\n` +
+            `📝 Tiêu đề: ${translatedTitle}\n` +
+            `Nội dung: ${apiMonitor.sanitizeForTelegram(translatedText)}`;
+
+        // Cắt thành nhiều parts nếu quá dài
+        const parts = apiMonitor.splitMessage(postMessage);
+
+        for (let partIndex = 0; partIndex < parts.length; partIndex++) {
+            const key = makeSentKey(postIndex, partIndex);
+
+            // Bỏ qua nếu đã gửi thành công ở lần chạy trước
+            if (sentKeys.includes(key)) {
+                logger.info(`[Worker] skip already sent: post=${postIndex} part=${partIndex}`);
+                continue;
             }
+
+            const part = parts[partIndex];
+            // Nếu bị cắt nhiều phần, thêm indicator
+            const textToSend = parts.length > 1
+                ? `${part}\n<i>(phần ${partIndex + 1}/${parts.length})</i>`
+                : part;
+
+            await sendTelegramMessage(telegramUrl, textToSend);
+
+            // Đánh dấu đã gửi và persist ngay vào Redis
+            sentKeys.push(key);
+            await job.updateData({ ...job.data, sentKeys });
+
+            logger.info(`[Worker] ✅ sent post=${postIndex + 1}/${sortedPosts.length} part=${partIndex + 1}/${parts.length}`);
+
         }
     }
 
 
     logger.info(`[Worker] finished job ${job.id} in ${Date.now() - start}ms`);
-    return { success: true, count: newData.length };
+    return { success: true, count: areaDatas.length };
 }, {
     connection: { host: process.env.REDIS_HOST || 'redis', port: Number(process.env.REDIS_PORT) || 6379 },
     concurrency: Number(process.env.WORKER_CONCURRENCY || 3)
 });
 
+// ── Helper: gửi message lên Telegram ──────────────────────────────────────
+async function sendTelegramMessage(url: string, text: string): Promise<void> {
+    try {
+        const response = await defaultAxios.post(url, {
+            chat_id: Number(process.env.TELEGRAM_CHAT_ID),
+            text,
+            parse_mode: 'HTML'
+        }, {
+            headers: { 'Content-Type': 'application/json' }
+        });
+        logger.info(`✅ Telegram sent: ${response.data?.ok}`);
+    } catch (err) {
+        logger.error('❌ Send Telegram error: ' + String(err));
+        throw err; // ném lên để BullMQ retry job
+    }
+}
 
 worker.on('completed', job => logger.info(`[Worker] completed ${job.id}`));
 worker.on('failed', (job, err) => logger.error(`[Worker] failed ${job?.id} ${String(err)}`));
