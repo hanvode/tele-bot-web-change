@@ -1,14 +1,17 @@
-import axios from 'axios';
 import sanitizeHtml from 'sanitize-html';
-import { APIData, INewData } from './type';
+import { APIData, INewData, TRANSLATE_SYSTEM_PROMPT } from './type';
 import { defaultAxios } from '../utils/http';
 import { logger } from '../utils/logger';
+import OpenAI from 'openai';
 
 export class APIMonitor {
+    private openai: OpenAI;
     constructor(
-        private translateProxy = '',
         private checkInterval = 3600,
     ) {
+        this.openai = new OpenAI({
+            apiKey: process.env.OPENAI_API_KEY || '',
+        });
     }
 
     public async getApiContent(articleId: string, channelId: string): Promise<APIData> {
@@ -30,7 +33,7 @@ export class APIMonitor {
             const res = await defaultAxios.post(url, form);
             return res.data || {};
         } catch (error) {
-            logger.error(`postFormDataApi error: ${String(error)}`);
+            logger.error(`postFormDataApi error: ${String(error)} ${url} channelId=${channelId} pageNum=${pageNum} pageSize=${pageSize}`);
             throw error;
         }
     }
@@ -71,77 +74,69 @@ export class APIMonitor {
         return newDatas;
     }
 
-
-    private async translateViaProxy(text: string): Promise<string> {
-        const maxRetries = 3;                     // thử lại tối đa 3 lần
-        const baseDelay = 500;                    // 500ms → 1s → 2s (exponential)
-
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                const response = await axios.post(this.translateProxy, {
-                    q: text,
-                    from: "zh-CN",
-                    to: "vi"
-                }, {
-                    timeout: 5000,                // tránh treo request
-                });
-
-                return response.data.translatedText;
-            } catch (err: any) {
-                const errMsg = err?.message || String(err);
-                console.error(`❌ Lỗi dịch qua proxy (attempt ${attempt}/${maxRetries}):`, errMsg, text);
-
-                if (attempt < maxRetries) {
-                    // exponential backoff delay
-                    const wait = baseDelay * Math.pow(2, attempt - 1);
-                    await new Promise(res => setTimeout(res, wait));
-                } else {
-                    // hết retry → fallback
-                    console.error("⚠️ Hết lượt retry, trả về text gốc:", text);
-                    return text;
-                }
-            }
-        }
-
-        return text; // fallback an toàn (không chạy tới đây)
-    }
-
-
-
     public async translateMultiline(text: string): Promise<string> {
         if (!text) return '';
+
+        const SEPARATOR = '|||';
+        const maxRetries = 3;
+        const baseDelay = 500;
+
+        // Tách thành từng dòng, bỏ dòng trắng
         const segments = text
             .split('\n')
             .map(line => line.trim())
             .filter(line => line !== '');
 
-        const translatedLines: string[] = [];
-        const batchSize = 5; // Số dòng mỗi batch
-        const separator = '|||'; // Dùng để tách các dòng trong batch
+        if (segments.length === 0) return '';
 
-        for (let i = 0; i < segments.length; i += batchSize) {
-            const batch = segments.slice(i, i + batchSize);
-            const batchText = batch.join(`\n${separator}\n`);
+        // Gộp tất cả dòng thành 1 prompt duy nhất
+        const combinedText = segments.join(`\n${SEPARATOR}\n`);
 
+        const systemPrompt = TRANSLATE_SYSTEM_PROMPT(SEPARATOR);
+
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                const translatedBatch = await this.translateViaProxy(batchText);
-                const lines = translatedBatch.split(separator).map(l => l.trim());
-                // Nếu số dòng dịch ra khớp, dùng luôn
-                if (lines.length === batch.length) {
-                    translatedLines.push(...lines);
-                } else {
-                    console.warn(`⚠️ Số dòng dịch không khớp batch (${i}): fallback về bản gốc`);
-                    translatedLines.push(...batch);
+                const response = await this.openai.chat.completions.create({
+                    model: 'gpt-4o-mini',
+                    temperature: 0.1,   // Độ sáng tạo thấp → dịch nhất quán hơn
+                    max_tokens: 16384,
+                    messages: [
+                        { role: 'system', content: systemPrompt },
+                        { role: 'user', content: combinedText },
+                    ],
+                }, {
+                    timeout: 60_000,     // ← thêm timeout 60s
+                });
+
+                const translated = response.choices[0]?.message?.content?.trim() || '';
+                const translatedSegments = translated.split(SEPARATOR).map(s => s.trim());
+
+                // Nếu số đoạn khớp → dùng luôn
+                if (translatedSegments.length === segments.length) {
+                    return translatedSegments.join('\n');
                 }
 
-            } catch (error: unknown) {
-                const errMsg = error instanceof Error ? error.message : String(error);
-                console.error(`❌ Lỗi dịch batch tại dòng ${i}:`, errMsg);
-                translatedLines.push(...batch); // fallback nếu lỗi
+                // Nếu không khớp số đoạn → log warning nhưng vẫn dùng kết quả
+                logger.warn(
+                    `⚠️ Số đoạn dịch không khớp: expected ${segments.length}, got ${translatedSegments.length}. Dùng kết quả nguyên.`
+                );
+                return translated;
+
+            } catch (err: any) {
+                const errMsg = err?.message || String(err);
+                logger.error(`❌ OpenAI translate error(attempt ${attempt} / ${maxRetries}): ${errMsg} `);
+
+                if (attempt < maxRetries) {
+                    const wait = baseDelay * Math.pow(2, attempt - 1);
+                    await new Promise(res => setTimeout(res, wait));
+                } else {
+                    logger.error('⚠️ Hết lượt retry, trả về text gốc.');
+                    return text; // fallback về text gốc
+                }
             }
         }
 
-        return translatedLines.join('\n');
+        return text;
     }
 
 
@@ -175,29 +170,6 @@ export class APIMonitor {
             .replace(/\[/g, '\\[');
 
         return clean.trim();
-    }
-
-
-    public async handleBuildMessage(newData: INewData[], areaName: string): Promise<string> {
-        let messageArea: string = ''
-        if (newData.length > 0) {
-            messageArea += `🌐 Khu vực: ${areaName} có ${newData.length} tin mới\n\n`
-            let stt = 1;
-            for (let i = newData.length - 1; i >= 0; i--) {
-                const itemChange = newData[i];
-                const articleId = itemChange.articleid;
-                const channelId = itemChange.channelId;
-                const existedNew = await this.getApiContent(articleId, channelId);
-                if (existedNew.articletitle?.includes('井钻') || existedNew.cmsArticleContent?.articlecontent?.includes('井钻') || existedNew.articletitle?.includes('海洋石油') || existedNew.cmsArticleContent?.articlecontent?.includes('海洋石油')) {
-                    messageArea += `🔔 Tin quan trọng!!\n`
-                }
-                messageArea += `⏰ Thời gian: ${existedNew?.articlepublishtime} (giờ Trung Quốc)\n` +
-                    `📝 ${stt}. Tiêu đề bài: ${(await this.translateMultiline(existedNew?.articletitle || ''))}\n
-                        Nội dung bài:\n${(await this.translateMultiline(existedNew?.cmsArticleContent?.articlecontent || ''))}\n\n`;
-                stt++;
-            }
-        }
-        return messageArea;
     }
 
 }
