@@ -79,7 +79,7 @@ export class APIMonitor {
 
         const SEPARATOR = '|||';
         const maxRetries = 3;
-        const baseDelay = 500;
+        const baseDelay = 200;
 
         // Tách thành từng dòng, bỏ dòng trắng
         const segments = text
