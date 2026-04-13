@@ -1,13 +1,15 @@
 export interface INewData {
-    articleid: string;
-    channelId: string;
-    articletitle?: string;
-    publishtime?: string;
+    articleId: string;
+    articleTitle: string;
+    articlePublishTime: string;
+    articleText: string;
+    isTop: boolean;
     [key: string]: any;
 }
 
 export interface APIData {
     data?: any[];
+    total?: number;
     list?: INewData[];
     articletitle?: string;
     articlepublishtime?: string;

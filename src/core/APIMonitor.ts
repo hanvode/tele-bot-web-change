@@ -14,26 +14,26 @@ export class APIMonitor {
         });
     }
 
-    public async getApiContent(articleId: string, channelId: string): Promise<APIData> {
-        try {
-            const res = await defaultAxios.get('https://www.msa.gov.cn/msacncms_wap//cmsarticle/getArticle', { params: { articleId, channelId, _: Date.now() } });
-            return res.data || {};
-        } catch (error) {
-            logger.error(`getApiContent error: ${String(error)}`);
-            throw error;
-        }
-    }
+    // public async getApiContent(articleId: string, channelId: string): Promise<APIData> {
+    //     try {
+    //         const res = await defaultAxios.get('https://www.msa.gov.cn/msacncms_wap//cmsarticle/getArticle', { params: { articleId, channelId, _: Date.now() } });
+    //         return res.data || {};
+    //     } catch (error) {
+    //         logger.error(`getApiContent error: ${String(error)}`);
+    //         throw error;
+    //     }
+    // }
 
-    private async postFormDataApi(url: string, channelId: string, pageNum: number, pageSize: number): Promise<APIData> {
+    private async postFormDataApi(url: string, channelId: string, pageNum: number, count: number): Promise<APIData> {
         try {
             const form = new FormData();
             form.append('channelId', channelId);
             form.append('pageNum', pageNum.toString());
-            form.append('pageSize', pageSize.toString());
+            form.append('count', count.toString());
             const res = await defaultAxios.post(url, form);
             return res.data || {};
         } catch (error) {
-            logger.error(`postFormDataApi error: ${String(error)} ${url} channelId=${channelId} pageNum=${pageNum} pageSize=${pageSize}`);
+            logger.error(`postFormDataApi error: ${String(error)} ${url} channelId=${channelId} pageNum=${pageNum} count=${count}`);
             throw error;
         }
     }
@@ -60,7 +60,7 @@ export class APIMonitor {
             if (!dataFromApiPost.list || dataFromApiPost.list.length === 0) break;
 
             for (const newData of dataFromApiPost.list) {
-                const postTime = new Date(newData.articlepublishtime).getTime();
+                const postTime = new Date(newData.articlePublishTime.replace(' ', 'T') + '+08:00').getTime();
                 if (postTime < thresholdTime) {
                     if (newData.isTop) continue;
                     isContinuePost = false;

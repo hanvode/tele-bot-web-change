@@ -17,10 +17,10 @@ export const worker = new Worker('monitorQueue', async job => {
     const sentKeys: SentKey[] = job.data.sentKeys ?? [];
     const start = Date.now();
     logger.info(`[Worker] job ${job.id} area ${areaName} sentKeys: ${sentKeys.length}`);
-    const tabTitle = index < 3 ? `🔔 Cảnh báo hàng hải: ` : `🔔 Thông báo: `;
+    const tabTitle = index > 3 ? `🔔 Cảnh báo hàng hải: ` : `🔔 Thông báo: `;
 
     const areaDatas = await apiMonitor.getChannelData(apiUrl, areaKey);
-    const sortedPosts = areaDatas.sort((a, b) => new Date(a.publishtime || '').getTime() - new Date(b.publishtime || '').getTime());
+    const sortedPosts = areaDatas.sort((a, b) => new Date(a.articlePublishTime || '').getTime() - new Date(b.articlePublishTime || '').getTime());
     const telegramUrl = `${process.env.PROXY_URL || ''}/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
     if (sortedPosts.length === 0) {
         logger.info(`[Worker] no new posts ${tabTitle} for area ${areaName}`);
@@ -39,16 +39,13 @@ export const worker = new Worker('monitorQueue', async job => {
 
     for (let postIndex = 0; postIndex < sortedPosts.length; postIndex++) {
         const post = sortedPosts[postIndex];
-        const articleId = post.articleid;
-        const channelId = post.channelId;
-        const existedNew = await apiMonitor.getApiContent(articleId, channelId);
-        const isImportantNew = existedNew.articletitle?.includes('井钻') || existedNew.cmsArticleContent?.articlecontent?.includes('井钻') || existedNew.articletitle?.includes('海洋石油') || existedNew.cmsArticleContent?.articlecontent?.includes('海洋石油');
+        const isImportantNew = post.articleTitle?.includes('井钻') || post.articleText?.includes('井钻') || post.articleTitle?.includes('海洋石油') || post.articleText?.includes('海洋石油');
         // Dịch nội dung bài
-        const translatedText = await apiMonitor.translateMultiline(existedNew?.cmsArticleContent?.articlecontent || '');
-        const translatedTitle = await apiMonitor.translateMultiline(existedNew?.articletitle || '');
+        const translatedText = await apiMonitor.translateMultiline(post?.articleText || '');
+        const translatedTitle = await apiMonitor.translateMultiline(post?.articleTitle || '');
         // Tạo nội dung tin nhắn cho post này
         const postMessage =
-            `${postIndex + 1}.${isImportantNew ? `🔔 Tin quan trọng!!` : ``} ${tabTitle} ${areaName} đăng lúc ${existedNew.articlepublishtime} (giờ TQ)\n` +
+            `${postIndex + 1}.${isImportantNew ? `🔔 Tin quan trọng!!` : ``} ${tabTitle} ${areaName} đăng lúc ${post.articlePublishTime} (giờ TQ)\n` +
             `📝 Tiêu đề: ${translatedTitle}\n` +
             `Nội dung: ${apiMonitor.sanitizeForTelegram(translatedText)}`;
 
