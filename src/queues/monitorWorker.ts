@@ -1,4 +1,5 @@
 import { APIMonitor } from "../core/APIMonitor";
+import { IAttachment } from "../core/type";
 import { Worker } from "bullmq";
 import { logger } from "../utils/logger";
 import { defaultAxios } from "../utils/http";
@@ -8,6 +9,10 @@ type SentKey = string;
 
 function makeSentKey(postIndex: number, partIndex: number): SentKey {
     return `${postIndex}:${partIndex}`;
+}
+
+function escapeHtml(text: string): string {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 const apiMonitor = new APIMonitor(Number(process.env.CHECK_INTERVAL || 60));
@@ -43,11 +48,19 @@ export const worker = new Worker('monitorQueue', async job => {
         // Dịch nội dung bài
         const translatedText = await apiMonitor.translateMultiline(post?.articleText || '');
         const translatedTitle = await apiMonitor.translateMultiline(post?.articleTitle || '');
+        // const sourceLine = post.source ? `\n📍 Nguồn: ${escapeHtml(post.source)}` : '';
+        const attachmentsLine = post.attachments?.length
+            ? '\n📎 Đính kèm:\n' + post.attachments
+                .map((a: IAttachment) => `<a href="${a.url}">${escapeHtml(a.name || 'Tệp đính kèm')}</a>`)
+                .join('\n')
+            : '';
+
         // Tạo nội dung tin nhắn cho post này
         const postMessage =
-            `${postIndex + 1}.${isImportantNew ? `🔔 Tin quan trọng!!` : ``} ${tabTitle} ${areaName} đăng lúc ${post.articlePublishTime} (giờ TQ)\n` +
+            `${postIndex + 1}.${isImportantNew ? `🔔 Tin quan trọng!!` : ``} ${tabTitle} ${areaName} đăng lúc ${post.articlePublishTime || post.publishTime || ''} (giờ TQ)\n` +
             `📝 Tiêu đề: ${translatedTitle}\n` +
-            `Nội dung: ${apiMonitor.sanitizeForTelegram(translatedText)}`;
+            `Nội dung: ${apiMonitor.sanitizeForTelegram(translatedText)}` +
+            attachmentsLine;
 
         // Cắt thành nhiều parts nếu quá dài
         const parts = apiMonitor.splitMessage(postMessage);

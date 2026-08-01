@@ -1,9 +1,17 @@
+export interface IAttachment {
+    name: string;
+    url: string;
+}
+
 export interface INewData {
     articleId: string;
     articleTitle: string;
     articlePublishTime: string;
     articleText: string;
     isTop: boolean;
+    source?: string;
+    publishTime?: string;
+    attachments?: IAttachment[];
     [key: string]: any;
 }
 

@@ -1,5 +1,6 @@
 import sanitizeHtml from 'sanitize-html';
-import { APIData, INewData, TRANSLATE_SYSTEM_PROMPT } from './type';
+import * as cheerio from 'cheerio/slim';
+import { APIData, IAttachment, INewData, TRANSLATE_SYSTEM_PROMPT } from './type';
 import { defaultAxios } from '../utils/http';
 import { logger } from '../utils/logger';
 import OpenAI from 'openai';
@@ -14,15 +15,58 @@ export class APIMonitor {
         });
     }
 
-    // public async getApiContent(articleId: string, channelId: string): Promise<APIData> {
-    //     try {
-    //         const res = await defaultAxios.get('https://www.msa.gov.cn/msacncms_wap//cmsarticle/getArticle', { params: { articleId, channelId, _: Date.now() } });
-    //         return res.data || {};
-    //     } catch (error) {
-    //         logger.error(`getApiContent error: ${String(error)}`);
-    //         throw error;
-    //     }
-    // }
+    private async getArticleContent(articleId: string, channelId: string): Promise<{
+        articleTitle: string;
+        articleText: string;
+        source?: string;
+        publishTime?: string;
+        attachments: IAttachment[];
+    }> {
+        try {
+            const res = await defaultAxios.get('https://www.msa.gov.cn/msacncms_wap/pages/content.jhtml', { params: { articleId, channelId } });
+            const $ = cheerio.load(res.data || '');
+
+            const meta = (name: string) => $(`meta[name="${name}"]`).attr('content')?.trim();
+
+            const contentNode = $('.content-page-main');
+
+            const attachments: IAttachment[] = [];
+            contentNode.find('a[href]').each((_, el) => {
+                const href = $(el).attr('href');
+                if (!href) return;
+                attachments.push({
+                    name: $(el).text().trim(),
+                    url: new URL(href, 'https://www.msa.gov.cn').toString(),
+                });
+            });
+
+            // clone để bỏ ảnh/script/style trước khi lấy text, không ảnh hưởng DOM gốc
+            const cloned = contentNode.clone();
+            cloned.find('img,script,style').remove();
+
+            const paragraphs = cloned
+                .find('p')
+                .map((_, el) => $(el).text().trim())
+                .get()
+                .filter(Boolean);
+            const rawText = paragraphs.length > 0 ? paragraphs.join('\n') : cloned.text().trim();
+            const articleText = rawText
+                .replace(/\u00A0/g, ' ')
+                .replace(/\r/g, '')
+                .replace(/\n\s*\n/g, '\n')
+                .replace(/[ \t]+/g, ' ')
+                .trim();
+
+            const articleTitle = meta('ArticleTitle') ?? $('.content-page-tit').text().trim();
+            const source = meta('ContentSource') ?? ($('.source').text().replace(/^来源[:：]/, '').trim() || undefined);
+            const publishTime = meta('PubDate') ?? ($('.time').text().replace(/^发布时间[:：]/, '').trim() || undefined);
+
+            return { articleTitle, articleText, source, publishTime, attachments };
+        } catch (error) {
+            logger.error(`getArticleContent error: ${String(error)} articleId=${articleId} channelId=${channelId}`);
+            return { articleTitle: '', articleText: '', attachments: [] };
+        }
+    }
 
     private async postFormDataApi(url: string, channelId: string, pageNum: number, count: number): Promise<APIData> {
         try {
@@ -41,7 +85,7 @@ export class APIMonitor {
     // Ví dụ sử dụng với giá trị cụ thể
     public async getChannelData(url: string, areaKey: string): Promise<INewData[]> {
         const now = Date.now()
-        const thresholdTime = now - (this.checkInterval * 1000);
+        const thresholdTime = now - (8 * 36000 * 1000);
         const newDatas: INewData[] = [];
         let isContinuePost = true;
         let start = 1;
@@ -66,7 +110,8 @@ export class APIMonitor {
                     isContinuePost = false;
                     break;
                 }
-                newDatas.push(newData);
+                const { articleTitle, articleText, source, publishTime, attachments } = await this.getArticleContent(newData.articleId, areaKey);
+                newDatas.push({ ...newData, articleTitle, articleText, source, publishTime, attachments });
             }
             start += 10;
 
